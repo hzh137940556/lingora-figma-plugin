@@ -1,6 +1,6 @@
 # Lingora Figma Mac 安装与更新
 
-这里分发 Lingora Figma 插件的正式版与测试版，无需 GitHub 账号、源码仓库、Node.js、Python 或 Homebrew。
+这里分发 Lingora Figma 插件的 develop 预发布版本，无需 GitHub 账号、源码仓库、Node.js、Python 或 Homebrew。
 编译后的插件可公开下载；安装包不包含账号、API Key 或个人设备设置。
 
 ## 安装或更新
@@ -8,16 +8,10 @@
 先安装 Figma 桌面端并保存、同步设计稿，然后在终端执行：
 
 ```bash
-/bin/bash -c "$(/usr/bin/curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/main/install.sh)"
-```
-
-上述命令固定使用 `main` 正式渠道。测试版使用独立的 `develop` 渠道：
-
-```bash
 /bin/bash -c "$(/usr/bin/curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/develop/install.sh)"
 ```
 
-两个渠道各自维护 `latest.json`，正式版不会自动安装测试版。同一渠道重复运行命令即可更新。脚本自动下载、校验、正常退出 Figma、备份配置、注册插件并重新打开 Figma。
+当前仅开放 `develop` 预发布渠道，正式版暂不发布。重复运行同一命令即可更新当前测试版本。脚本自动下载、校验、正常退出 Figma、备份配置、注册插件并重新打开 Figma。
 不需要导入 manifest。安装后从 Plugins → Development → Lingora localization 运行插件。
 首次使用仍需填写自己的 Lingora 服务、项目和 API Key。
 
@@ -32,7 +26,7 @@
 仅检查下载与配置兼容性，不退出 Figma 或写入注册：
 
 ```bash
-/bin/bash -c "$(/usr/bin/curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/main/install.sh)" -- --check
+/bin/bash -c "$(/usr/bin/curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/develop/install.sh)" -- --check
 ```
 
 ## 备份与恢复
@@ -75,5 +69,6 @@ CI 在独立的 Apple Silicon 和 Intel macOS runner 上匿名下载发布包、
 
 插件源码维护在 Lingora 源码仓库，本仓库只保存公开分发脚本、版本索引和验证流程。
 `main` 对应正式版 Release，`develop` 对应 prerelease；源码仓库同名分支的构建只能更新同名渠道。
-版本附件不可覆盖，先完成 Release 发布，再更新该渠道索引。首次 `v0.1.0` 为已验证插件的人工迁移发布，
-后续由源码仓库工作流发布；自动流程需要维护者配置跨仓库发布凭据。
+版本附件不可覆盖，先完成 Release 发布，再通过审核后的 PR 更新同名渠道索引。
+当前预发布版本为 `v0.1.0-rc.1`；正式版暂不发布。后续由源码仓库工作流发布；
+自动流程需要维护者配置具备 Contents 和 Pull requests 读写权限的跨仓库发布凭据。
