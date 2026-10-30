@@ -1,9 +1,8 @@
 name: Publish channel release
 on:
   push:
-    branches: [develop, main]
+    branches: ['release/develop-v*', 'release/main-v*']
     paths: [release.json, plugin.tar.gz]
-  workflow_dispatch:
 permissions:
   contents: write
 concurrency:
@@ -11,17 +10,33 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    if: github.ref == 'refs/heads/develop' || (github.ref == 'refs/heads/main' && vars.FIGMA_STABLE_RELEASE_ENABLED == 'true')
+    if: startsWith(github.ref_name, 'release/develop-v') || (startsWith(github.ref_name, 'release/main-v') && vars.FIGMA_STABLE_RELEASE_ENABLED == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      CHANNEL: ${{ github.ref_name }}
+      ARTIFACT_REF: ${{ github.ref_name }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+    outputs:
+      channel: ${{ steps.artifact.outputs.channel }}
+      artifact_sha: ${{ steps.artifact.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Validate immutable artifact branch
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_REF" =~ ^release/(develop|main)-v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
+          channel=$(jq -er '.channel' release.json)
+          version=$(jq -er '.version' release.json)
+          test "$ARTIFACT_REF" = "release/$channel-v$version"
+          echo "CHANNEL=$channel" >> "$GITHUB_ENV"
+          echo "ARTIFACT_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -36,7 +51,7 @@ jobs:
           if ! gh release view "$tag" --json isDraft >/dev/null 2>&1; then
             args=()
             if [ "$CHANNEL" = develop ]; then args+=(--prerelease); fi
-            gh release create "$tag" --target "$GITHUB_SHA" --draft --title "Lingora Figma $version" --notes "渠道：$CHANNEL。支持 macOS / Figma 126.x。" "${args[@]}"
+            gh release create "$tag" --target "$ARTIFACT_SHA" --draft --title "Lingora Figma $version" --notes "渠道：$CHANNEL。支持 macOS / Figma 126.x。" "${args[@]}"
           fi
           mkdir -p downloaded
           for file in lingora-figma-macos.tar.gz SHA256SUMS latest.json install.sh; do
@@ -56,5 +71,8 @@ jobs:
   verify-installation:
     needs: publish
     uses: ./.github/workflows/macos-smoke.yml
+    with:
+      channel: ${{ needs.publish.outputs.channel }}
+      artifact_sha: ${{ needs.publish.outputs.artifact_sha }}
     permissions:
       contents: read

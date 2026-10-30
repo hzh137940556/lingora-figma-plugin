@@ -33,18 +33,63 @@ trap cleanup EXIT
 # 下载仅允许 HTTPS，限制连接和总耗时；不使用 GitHub 凭据。
 fetch() { curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 "$1" -o "$2"; }
 echo '正在查询 Lingora 最新安装版本…'
-# 新流程从构建元数据定位不可变 Release；兼容迁移前已有的版本索引。
-STATUS=$(curl --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 --write-out '%{http_code}' "${SOURCE%/}/release.json" -o "$TMP/build.json")
-if [[ "$STATUS" == 200 ]]; then
-  BUILD_VERSION=$(/usr/bin/plutil -extract version raw -o - "$TMP/build.json")
-  BUILD_CHANNEL=$(/usr/bin/plutil -extract channel raw -o - "$TMP/build.json")
-  [[ "$BUILD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ && "$BUILD_CHANNEL" == "$CHANNEL" ]] || { echo '构建版本或渠道无效。' >&2; exit 1; }
+# 默认匿名查询已完成的渠道 Release；固定构建地址仅供发布验收使用。
+if [[ -z "${LINGORA_DISTRIBUTION_URL:-}" ]]; then
+  PAGE=1
+  BUILD_VERSION=''
+  while :; do
+    fetch "https://api.github.com/repos/hzh137940556/lingora-figma-plugin/releases?per_page=100&page=$PAGE" "$TMP/releases.json"
+    /usr/bin/osascript -l JavaScript - "$TMP/releases.json" "$CHANNEL" "$BUILD_VERSION" > "$TMP/selection" <<'RELEASE_JXA'
+// 按渠道选择最高版本，忽略草稿和不完整附件；跨分页保留当前最高版本。
+ObjC.import('Foundation');
+function selectRelease(releases, channel, previous) {
+  if (!Array.isArray(releases)) throw Error('GitHub Release 列表无效');
+  var pattern = channel === 'develop' ? /^v([0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+)$/ : /^v([0-9]+\.[0-9]+\.[0-9]+)$/;
+  var best = previous || '';
+  var required = ['latest.json', 'lingora-figma-macos.tar.gz', 'SHA256SUMS', 'install.sh'];
+  releases.forEach(function (release) {
+    var match = pattern.exec(release.tag_name);
+    if (!match || release.draft !== false || release.prerelease !== (channel === 'develop') || !Array.isArray(release.assets)) return;
+    if (!required.every(function (name) { return release.assets.some(function (asset) { return asset.name === name && asset.state === 'uploaded'; }); })) return;
+    var candidate = match[1];
+    var parts = candidate.split(/[.\-]/).filter(function (part) { return part !== 'rc'; }).map(Number);
+    var current = best.split(/[.\-]/).filter(function (part) { return part !== 'rc'; }).map(Number);
+    for (var i = 0; i < parts.length; i++) {
+      if (!best || parts[i] > current[i]) { best = candidate; break; }
+      if (parts[i] < current[i]) break;
+    }
+  });
+  return best;
+}
+// 读取单页响应供安装器分页遍历，不依赖额外运行时。
+function run(args) {
+  var value = $.NSString.stringWithContentsOfFileEncodingError($(args[0]), $.NSUTF8StringEncoding, null);
+  var releases = JSON.parse(ObjC.unwrap(value));
+  return [releases.length, selectRelease(releases, args[1], args[2])].join('\n');
+}
+RELEASE_JXA
+    COUNT=$(sed -n '1p' "$TMP/selection")
+    BUILD_VERSION=$(sed -n '2p' "$TMP/selection")
+    [[ "$COUNT" =~ ^[0-9]+$ ]] || { echo 'Release 列表无效。' >&2; exit 1; }
+    [[ "$COUNT" == 100 ]] || break
+    PAGE=$((PAGE + 1))
+  done
+  [[ -n "$BUILD_VERSION" ]] || { echo "尚无可安装的 $CHANNEL Release。" >&2; exit 1; }
   fetch "https://github.com/hzh137940556/lingora-figma-plugin/releases/download/v$BUILD_VERSION/latest.json" "$TMP/latest.json"
-elif [[ "$STATUS" == 404 ]]; then
-  fetch "${SOURCE%/}/latest.json" "$TMP/latest.json"
 else
-  echo "查询构建元数据失败：HTTP $STATUS" >&2
-  exit 1
+  # 新流程从构建元数据定位不可变 Release；兼容迁移前已有的版本索引。
+  STATUS=$(curl --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 --write-out '%{http_code}' "${SOURCE%/}/release.json" -o "$TMP/build.json")
+  if [[ "$STATUS" == 200 ]]; then
+    BUILD_VERSION=$(/usr/bin/plutil -extract version raw -o - "$TMP/build.json")
+    BUILD_CHANNEL=$(/usr/bin/plutil -extract channel raw -o - "$TMP/build.json")
+    [[ "$BUILD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ && "$BUILD_CHANNEL" == "$CHANNEL" ]] || { echo '构建版本或渠道无效。' >&2; exit 1; }
+    fetch "https://github.com/hzh137940556/lingora-figma-plugin/releases/download/v$BUILD_VERSION/latest.json" "$TMP/latest.json"
+  elif [[ "$STATUS" == 404 ]]; then
+    fetch "${SOURCE%/}/latest.json" "$TMP/latest.json"
+  else
+    echo "查询构建元数据失败：HTTP $STATUS" >&2
+    exit 1
+  fi
 fi
 /usr/bin/osascript -l JavaScript - "$TMP/latest.json" > "$TMP/metadata" <<'JXA'
 // 校验发布索引，禁止路径穿越、任意协议和不完整摘要。

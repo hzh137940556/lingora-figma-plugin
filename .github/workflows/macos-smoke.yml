@@ -2,6 +2,13 @@ name: Anonymous Mac distribution checks
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      channel:
+        required: true
+        type: string
+      artifact_sha:
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -16,7 +23,8 @@ jobs:
       - name: Anonymous download and native JXA checks (no source checkout)
         shell: bash
         env:
-          CHANNEL: ${{ github.ref_name }}
+          CHANNEL: ${{ inputs.channel || github.ref_name }}
+          ARTIFACT_COMMIT: ${{ inputs.artifact_sha || github.sha }}
           COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -27,9 +35,10 @@ jobs:
           # 仅用于兼容性预检的版本 fixture；不冒充真实 Figma 应用。
           /usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string 126.10.13' "$HOME/Applications/Figma.app/Contents/Info.plist"
           curl -fLsS https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT/install.sh -o "$TASK_ROOT/install.sh"
-          export LINGORA_DISTRIBUTION_URL="https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT"
+          export LINGORA_DISTRIBUTION_URL="https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$ARTIFACT_COMMIT"
           /bin/bash "$TASK_ROOT/install.sh" --channel "$CHANNEL" --check
-          status=$(curl -LsS -w '%{http_code}' "https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT/release.json" -o "$TASK_ROOT/build.json")
+          env -u LINGORA_DISTRIBUTION_URL /bin/bash "$TASK_ROOT/install.sh" --channel "$CHANNEL" --check
+          status=$(curl -LsS -w '%{http_code}' "https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$ARTIFACT_COMMIT/release.json" -o "$TASK_ROOT/build.json")
           if [ "$status" = 200 ]; then
             version=$(/usr/bin/plutil -extract version raw -o - "$TASK_ROOT/build.json")
             curl -fLsS "https://github.com/hzh137940556/lingora-figma-plugin/releases/download/v$version/latest.json" -o "$TASK_ROOT/latest.json"

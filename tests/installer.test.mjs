@@ -65,3 +65,20 @@ test('在 macOS 原生 JXA 执行：无仓库路径、无设置、中文空格�
     assert.equal(readFileSync(settings, 'utf8'), '{broken');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+// 执行安装器内同一选择逻辑，覆盖跨渠道、跨分页和晚发布旧版本。
+const installer = readFileSync(new URL('../install.sh', import.meta.url), 'utf8');
+const selectorSource = installer.split("<<'RELEASE_JXA'\n")[1].split('\nRELEASE_JXA')[0];
+const selectRelease = vm.runInNewContext(selectorSource + '\nselectRelease', { ObjC: { import() {} } });
+// 生成附件完整的 GitHub Release 响应，不访问真实服务。
+const release = (version, prerelease = true) => ({ tag_name: `v${version}`, draft: false, prerelease, assets: ['latest.json', 'lingora-figma-macos.tar.gz', 'SHA256SUMS', 'install.sh'].map(name => ({ name, state: 'uploaded' })) });
+test('渠道隔离、数字排序和分页累计，不因旧版本晚发布而降级', () => {
+  const releases = [release('0.1.0-rc.9'), release('0.1.0-rc.100'), release('2.0.0', false)];
+  assert.equal(selectRelease(releases, 'develop', ''), '0.1.0-rc.100');
+  assert.equal(selectRelease(releases, 'main', ''), '2.0.0');
+  assert.equal(selectRelease(releases, 'develop', '0.2.0-rc.1'), '0.2.0-rc.1');
+});
+test('草稿、不完整附件及非法版本均不能被安装', () => {
+  assert.equal(selectRelease([{ ...release('0.2.0-rc.1'), draft: true }, { ...release('0.3.0-rc.1'), assets: [] }, release('../bad'), release('0.4.0-rc.1', false)], 'develop', ''), '');
+  assert.throws(() => selectRelease({}, 'develop', ''));
+});
