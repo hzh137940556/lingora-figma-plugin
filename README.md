@@ -71,17 +71,20 @@ CI 在独立的 Apple Silicon 和 Intel macOS runner 上匿名下载发布包、
 
 - Lingora 源码仓库只测试、编译、归档三个插件文件，并通过 CI 推送 `plugin.tar.gz` 和 `release.json`。
 - 分发仓库独立维护 `install.sh`、`scripts/registry.js`、安装测试和发布工作流。安装器不会从 Lingora 同步。
-- 源 develop 的产物进入 `release/develop-v<版本>`，PR 目标必须为 develop；源 main 进入 `release/main-v<版本>`，PR 目标必须为 main。
-- 审核合并产物 PR 后，本仓库制作 Mac 安装包并发布对应 Release；附件完整后才结束发布，随后运行 Intel / Apple Silicon 匿名安装预检。
+- 源 develop 的产物进入 `release/develop-v<版本>`；源 main 进入 `release/main-v<版本>`。分支从对应渠道创建，保留该渠道的安装器。
+- 推送产物分支直接触发本仓库制作 Mac 安装包并发布对应 Release，不创建 PR，也不合并产物到 develop/main；附件完整后才结束发布，随后运行 Intel / Apple Silicon 匿名安装预检。
 
 当前只启用 develop。main 发布需在源码和分发仓库分别显式开启 `FIGMA_STABLE_RELEASE_ENABLED=true`。
-Lingora 的 `FIGMA_DISTRIBUTION_TOKEN` 只需要目标仓库 Contents 和 Pull requests 读写权限；
+Lingora 的 `FIGMA_DISTRIBUTION_TOKEN` 只需要目标仓库 Contents 读写权限；
 本仓库发布 Release 使用自己的 GITHUB_TOKEN，不需要把私有源码仓库凭据交给安装用户。
 
 `release.json` 记录版本、来源提交、渠道和编译包 SHA-256，不包含凭据。
-新安装器读取对应渠道的构建元数据，再下载该版本 Release 的 `latest.json` 和安装包。
-合并到 Release 发布完成之间，安装会明确失败，稍后重复命令即可，不回退安装其他渠道。
-没有构建元数据时兼容旧的分支 `latest.json`，保留已发布的 v0.1.0-rc.1 安装入口。
+安装器匿名查询 GitHub Releases，分页选择对应渠道已发布且附件完整的最高版本，再下载该版本的 `latest.json` 和安装包。develop 只选择 rc 预发布，main 只选择正式版；不依赖渠道分支上的版本索引。
+发布期间仍可安装上一已完成版本；GitHub API 限流或网络失败会明确停止，不修改 Figma 配置。
+
+新流程生效后，下一次源码构建创建的产物分支会自动发布。此前已存在的分支不会因工作流修改而追溯触发。
+发布步骤失败时，可在对应 Actions run 中重跑失败任务；已发布附件不得覆盖。
+安装器及工作流的维护改动仍遵循 develop/main 的分支规则，与每次产物分发无关。
 
 开发检查（仅维护者需要 Node 和 Python，安装用户不需要）：
 
