@@ -1,0 +1,47 @@
+name: Anonymous Mac distribution checks
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, develop]
+    paths: ['install.sh', 'latest.json', '.github/workflows/macos-smoke.yml']
+permissions:
+  contents: read
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Anonymous download and native JXA checks (no source checkout)
+        shell: bash
+        env:
+          CHANNEL: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$CHANNEL" == main || "$CHANNEL" == develop ]]
+          TASK_ROOT=$(mktemp -d)
+          export HOME="$TASK_ROOT/中文 空格 用户"
+          mkdir -p "$HOME/Applications/Figma.app/Contents" "$TASK_ROOT/package"
+          # 仅用于兼容性预检的版本 fixture；不冒充真实 Figma 应用。
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string 126.10.13' "$HOME/Applications/Figma.app/Contents/Info.plist"
+          curl -fLsS https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT/install.sh -o "$TASK_ROOT/install.sh"
+          export LINGORA_DISTRIBUTION_URL="https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT"
+          grep -qx "CHANNEL=$CHANNEL" "$TASK_ROOT/install.sh"
+          /bin/bash "$TASK_ROOT/install.sh" --check
+          curl -fLsS https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT/latest.json -o "$TASK_ROOT/latest.json"
+          PACKAGE_URL=$(/usr/bin/plutil -extract url raw -o - "$TASK_ROOT/latest.json")
+          SHA=$(/usr/bin/plutil -extract sha256 raw -o - "$TASK_ROOT/latest.json")
+          curl -fLsS "$PACKAGE_URL" -o "$TASK_ROOT/package.tar.gz"
+          test "$(shasum -a 256 "$TASK_ROOT/package.tar.gz" | cut -d ' ' -f 1)" = "$SHA"
+          tar -xzf "$TASK_ROOT/package.tar.gz" -C "$TASK_ROOT/package"
+          /usr/bin/osascript -l JavaScript "$TASK_ROOT/package/registry.js" "$TASK_ROOT/missing.json" "$TASK_ROOT/package/manifest.json" "$HOME/plugin" "$TASK_ROOT/first.json"
+          /usr/bin/osascript -l JavaScript "$TASK_ROOT/package/registry.js" "$TASK_ROOT/first.json" "$TASK_ROOT/package/manifest.json" "$HOME/plugin" "$TASK_ROOT/second.json"
+          cmp "$TASK_ROOT/first.json" "$TASK_ROOT/second.json"
+          printf '{broken' > "$TASK_ROOT/broken.json"
+          if /usr/bin/osascript -l JavaScript "$TASK_ROOT/package/registry.js" "$TASK_ROOT/broken.json" "$TASK_ROOT/package/manifest.json" "$HOME/plugin" "$TASK_ROOT/never.json"; then exit 1; fi
+          test ! -e "$TASK_ROOT/never.json"
+          echo 'PASS: anonymous package, system-only preflight, fresh registry, repeat install, corrupt settings refusal'
