@@ -5,6 +5,11 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export LC_ALL=C
 umask 077
 CHANNEL=develop
+if [[ "${1:-}" == --channel ]]; then
+  [[ "${2:-}" == main || "${2:-}" == develop ]] || { echo '渠道必须为 main 或 develop。' >&2; exit 1; }
+  CHANNEL="$2"
+  shift 2
+fi
 SOURCE="${LINGORA_DISTRIBUTION_URL:-https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$CHANNEL}"
 MODE="${1:-install}"
 [[ "$MODE" == install || "$MODE" == --check ]] || { echo '用法：bash install.sh [--check]' >&2; exit 1; }
@@ -28,7 +33,19 @@ trap cleanup EXIT
 # 下载仅允许 HTTPS，限制连接和总耗时；不使用 GitHub 凭据。
 fetch() { curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 "$1" -o "$2"; }
 echo '正在查询 Lingora 最新安装版本…'
-fetch "${SOURCE%/}/latest.json" "$TMP/latest.json"
+# 新流程从构建元数据定位不可变 Release；兼容迁移前已有的版本索引。
+STATUS=$(curl --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 --write-out '%{http_code}' "${SOURCE%/}/release.json" -o "$TMP/build.json")
+if [[ "$STATUS" == 200 ]]; then
+  BUILD_VERSION=$(/usr/bin/plutil -extract version raw -o - "$TMP/build.json")
+  BUILD_CHANNEL=$(/usr/bin/plutil -extract channel raw -o - "$TMP/build.json")
+  [[ "$BUILD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ && "$BUILD_CHANNEL" == "$CHANNEL" ]] || { echo '构建版本或渠道无效。' >&2; exit 1; }
+  fetch "https://github.com/hzh137940556/lingora-figma-plugin/releases/download/v$BUILD_VERSION/latest.json" "$TMP/latest.json"
+elif [[ "$STATUS" == 404 ]]; then
+  fetch "${SOURCE%/}/latest.json" "$TMP/latest.json"
+else
+  echo "查询构建元数据失败：HTTP $STATUS" >&2
+  exit 1
+fi
 /usr/bin/osascript -l JavaScript - "$TMP/latest.json" > "$TMP/metadata" <<'JXA'
 // 校验发布索引，禁止路径穿越、任意协议和不完整摘要。
 ObjC.import('Foundation');
@@ -40,6 +57,7 @@ function run(args) {
 }
 JXA
 RELEASE=$(sed -n '1p' "$TMP/metadata")
+if [[ -n "${BUILD_VERSION:-}" && "$RELEASE" != "$BUILD_VERSION" ]]; then echo 'Release 索引版本不一致。' >&2; exit 1; fi
 URL=$(sed -n '2p' "$TMP/metadata")
 DIGEST=$(sed -n '3p' "$TMP/metadata")
 PLUGIN_ID=$(sed -n '4p' "$TMP/metadata")

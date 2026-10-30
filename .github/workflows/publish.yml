@@ -1,0 +1,60 @@
+name: Publish channel release
+on:
+  push:
+    branches: [develop, main]
+    paths: [release.json, plugin.tar.gz]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: figma-release-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/develop' || (github.ref == 'refs/heads/main' && vars.FIGMA_STABLE_RELEASE_ENABLED == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CHANNEL: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test tests/*.test.mjs
+      - run: node scripts/package-release.mjs
+      - name: Publish without replacing existing assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(jq -er '.version' release.json)
+          tag="v$version"
+          if ! gh release view "$tag" --json isDraft >/dev/null 2>&1; then
+            args=()
+            if [ "$CHANNEL" = develop ]; then args+=(--prerelease); fi
+            gh release create "$tag" --target "$GITHUB_SHA" --draft --title "Lingora Figma $version" --notes "渠道：$CHANNEL。支持 macOS / Figma 126.x。" "${args[@]}"
+          fi
+          mkdir -p downloaded
+          for file in lingora-figma-macos.tar.gz SHA256SUMS latest.json install.sh; do
+            if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx "$file"; then
+              gh release download "$tag" --pattern "$file" --output "downloaded/$file"
+              cmp "downloaded/$file" "dist/$file"
+            else
+              test "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true
+              gh release upload "$tag" "dist/$file"
+            fi
+          done
+          if [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$tag" --draft=false --latest="$([ "$CHANNEL" = main ] && echo true || echo false)"
+          fi
+          echo "https://github.com/$GH_REPO/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
+
+  verify-installation:
+    needs: publish
+    uses: ./.github/workflows/macos-smoke.yml
+    permissions:
+      contents: read

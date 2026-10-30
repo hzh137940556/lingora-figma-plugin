@@ -1,0 +1,29 @@
+name: Validate distribution changes
+on:
+  pull_request:
+    branches: [develop, main]
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-14, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: node --test tests/*.test.mjs
+      - name: Validate incoming compiled artifact
+        if: hashFiles('release.json') != ''
+        env:
+          CHANNEL: ${{ github.base_ref }}
+        run: node scripts/package-release.mjs
