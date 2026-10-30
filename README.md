@@ -67,8 +67,29 @@ CI 在独立的 Apple Silicon 和 Intel macOS runner 上匿名下载发布包、
 
 ## 发布维护
 
-插件源码维护在 Lingora 源码仓库，本仓库只保存公开分发脚本、版本索引和验证流程。
-`main` 对应正式版 Release，`develop` 对应 prerelease；源码仓库同名分支的构建只能更新同名渠道。
-版本附件不可覆盖，先完成 Release 发布，再通过审核后的 PR 更新同名渠道索引。
-当前预发布版本为 `v0.1.0-rc.1`；正式版暂不发布。后续由源码仓库工作流发布；
-自动流程需要维护者配置具备 Contents 和 Pull requests 读写权限的跨仓库发布凭据。
+职责严格分开：
+
+- Lingora 源码仓库只测试、编译、归档三个插件文件，并通过 CI 推送 `plugin.tar.gz` 和 `release.json`。
+- 分发仓库独立维护 `install.sh`、`scripts/registry.js`、安装测试和发布工作流。安装器不会从 Lingora 同步。
+- 源 develop 的产物进入 `release/develop-v<版本>`，PR 目标必须为 develop；源 main 进入 `release/main-v<版本>`，PR 目标必须为 main。
+- 审核合并产物 PR 后，本仓库制作 Mac 安装包并发布对应 Release；附件完整后才结束发布，随后运行 Intel / Apple Silicon 匿名安装预检。
+
+当前只启用 develop。main 发布需在源码和分发仓库分别显式开启 `FIGMA_STABLE_RELEASE_ENABLED=true`。
+Lingora 的 `FIGMA_DISTRIBUTION_TOKEN` 只需要目标仓库 Contents 和 Pull requests 读写权限；
+本仓库发布 Release 使用自己的 GITHUB_TOKEN，不需要把私有源码仓库凭据交给安装用户。
+
+`release.json` 记录版本、来源提交、渠道和编译包 SHA-256，不包含凭据。
+新安装器读取对应渠道的构建元数据，再下载该版本 Release 的 `latest.json` 和安装包。
+合并到 Release 发布完成之间，安装会明确失败，稍后重复命令即可，不回退安装其他渠道。
+没有构建元数据时兼容旧的分支 `latest.json`，保留已发布的 v0.1.0-rc.1 安装入口。
+
+开发检查（仅维护者需要 Node 和 Python，安装用户不需要）：
+
+```bash
+node --test tests/*.test.mjs
+CHANNEL=develop node scripts/package-release.mjs
+```
+
+第二条命令要求已有 Lingora CI 生成的 `release.json` 和 `plugin.tar.gz`。
+安装包制作使用标准库固定 tar/gzip 元数据，重复构建可逐字节比对；已存在附件不得覆盖。
+修改安装器后如需发布新安装包，应接收一个新版本的构建产物，不覆盖旧版本。

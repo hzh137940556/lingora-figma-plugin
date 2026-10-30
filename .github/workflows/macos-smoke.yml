@@ -1,9 +1,7 @@
 name: Anonymous Mac distribution checks
 on:
   workflow_dispatch:
-  push:
-    branches: [main, develop]
-    paths: ['install.sh', 'latest.json', '.github/workflows/macos-smoke.yml']
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -30,9 +28,16 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string 126.10.13' "$HOME/Applications/Figma.app/Contents/Info.plist"
           curl -fLsS https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT/install.sh -o "$TASK_ROOT/install.sh"
           export LINGORA_DISTRIBUTION_URL="https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT"
-          grep -qx "CHANNEL=$CHANNEL" "$TASK_ROOT/install.sh"
-          /bin/bash "$TASK_ROOT/install.sh" --check
-          curl -fLsS https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT/latest.json -o "$TASK_ROOT/latest.json"
+          /bin/bash "$TASK_ROOT/install.sh" --channel "$CHANNEL" --check
+          status=$(curl -LsS -w '%{http_code}' "https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT/release.json" -o "$TASK_ROOT/build.json")
+          if [ "$status" = 200 ]; then
+            version=$(/usr/bin/plutil -extract version raw -o - "$TASK_ROOT/build.json")
+            curl -fLsS "https://github.com/hzh137940556/lingora-figma-plugin/releases/download/v$version/latest.json" -o "$TASK_ROOT/latest.json"
+          elif [ "$status" = 404 ]; then
+            curl -fLsS "https://raw.githubusercontent.com/hzh137940556/lingora-figma-plugin/$COMMIT/latest.json" -o "$TASK_ROOT/latest.json"
+          else
+            exit 1
+          fi
           PACKAGE_URL=$(/usr/bin/plutil -extract url raw -o - "$TASK_ROOT/latest.json")
           SHA=$(/usr/bin/plutil -extract sha256 raw -o - "$TASK_ROOT/latest.json")
           curl -fLsS "$PACKAGE_URL" -o "$TASK_ROOT/package.tar.gz"
